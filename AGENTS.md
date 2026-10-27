@@ -1,12 +1,12 @@
-# AGENTS.md — writing hub-to-hub code with `spikecomm`
+# AGENTS.md — writing hub-to-hub (and web-page-to-hub) code with `spikecomm`
 
-You are helping a student write MicroPython programs for **LEGO SPIKE Prime hubs** that talk to each other over Bluetooth using the `spikecomm` library (v1.2.0). The student has already copied `spikecomm.py` onto each hub. Read this whole file before writing code.
+You are helping a student write MicroPython programs for **LEGO SPIKE Prime hubs** that talk to each other (or to a web page) over Bluetooth using the `spikecomm` library (v1.2.0). The student has already copied `spikecomm.py` onto each hub. Read this whole file before writing code.
 
 ## Environment
 
 - Hardware: LEGO SPIKE Prime hubs, **SPIKE App 3 firmware** (MicroPython).
 - **How programs must be started:** from the hub's REPL over USB (paste mode: Ctrl-C, Ctrl-E, paste, Ctrl-D; or `exec(open("/flash/program/00/program.py").read())` for a program saved in slot 0; or `mpremote run program.py`). The SPIKE App's Run button and the hub's program menu do **not** work — the firmware blocks Bluetooth for programs it starts, and spikecomm raises `ImportError: spikecomm can't use Bluetooth in a program started from a program slot...`. After starting, the USB cable can be unplugged and the program keeps running. Tell the student this when you give them code.
-- Import the library with `from spikecomm import ...`. Do **not** paste the library into the program, and do not use `pip`, `asyncio` servers, Wi-Fi, sockets, threads, or `import bluetooth` — none of those are how this works.
+- Import the library with `from spikecomm import ...`. Do **not** paste the library into the program, and do not use `pip`, `asyncio` servers, Wi-Fi, sockets, threads, or `import bluetooth` — none of those are how this works. (This is about hub programs. A web page that talks to a hub is plain HTML + JavaScript using Web Bluetooth: see "Web pages" below.)
 - **Each hub runs its own program.** When a project uses several hubs, write one separate, complete program per hub and label each clearly (e.g. `# ===== Hub A (robot) =====`). Make sure names/prefixes match between them.
 - Use the SPIKE App 3 hub API (see the cheat sheet at the end). Do not use SPIKE 2 / Robot Inventor APIs (`from spike import PrimeHub`, `Motor('A')`, `motor.run_at_speed`, `get_distance_cm`), Pybricks APIs, or EV3 APIs.
 
@@ -16,8 +16,9 @@ You are helping a student write MicroPython programs for **LEGO SPIKE Prime hubs
 |---|---|
 | Share sensor values / status; 3 or more hubs; each hub both sends and receives | **Beacon + Scanner** (broadcast, no connection) |
 | Exactly two hubs; every message must arrive (commands, text, handshakes) | **Peripheral + Central** (connection) |
+| A web page (Chrome or Edge) talks to a hub | **Peripheral** on the hub; the page connects with Web Bluetooth (see "Web pages"). A page can't use Beacon + Scanner. |
 
-If unsure, prefer Beacon + Scanner: it has fewer ways to fail.
+If unsure between hubs, prefer Beacon + Scanner: it has fewer ways to fail.
 
 ## Hard rules (follow these in every program)
 
@@ -91,7 +92,7 @@ decode("42;3.14;ok")        # -> [42, 3.14, "ok"]
 
 ## Templates
 
-Adapt these; keep their structure. Fuller pairs, tested on real hubs, are in the `examples/` folder if the student has it: `tilt_arrow_hubA.py` / `tilt_arrow_hubB.py` (Hub B's screen shows an arrow for the way Hub A is tilted) and `distance_spin_hubA.py` / `distance_spin_hubB.py` (Template 6 with light-matrix status indicators and signal-loss handling).
+Adapt these; keep their structure. Fuller pairs, tested on real hubs, are in the `examples/` folder if the student has it: `tilt_arrow_hubA.py` / `tilt_arrow_hubB.py` (Hub B's screen shows an arrow for the way Hub A is tilted) and `distance_spin_hubA.py` / `distance_spin_hubB.py` (Template 6 with light-matrix status indicators and signal-loss handling). Hub + web page pairs are in `examples/web_drive/` (see "Web pages").
 
 ### 1. Share a sensor value (Beacon → Scanner)
 
@@ -292,6 +293,144 @@ while True:
     time.sleep_ms(20)
 ```
 
+## Web pages (Web Bluetooth)
+
+A web page in **Chrome or Edge** (on a computer, Chromebook or Android; not Safari, Firefox, or any browser on iPhone/iPad) can talk to a hub that runs a `Peripheral`: the page plays the Central. The hub program is ordinary spikecomm code, started from the REPL as usual. The page is one `.html` file with plain JavaScript: no libraries, no build step, no server. Give the student both, labeled `# ===== Hub =====` and `<!-- ===== Web page ===== -->`, and tell them to open the page in Chrome or Edge and click Connect. Tested on a real hub with Chrome. Complete examples in `examples/web_drive/`: `simple.py` + `simple.html` (Template 7) and `main.py` + `index.html` (drive a car with W A S D, Space to stop, a speed slider, motors stop if the page disconnects).
+
+Rules for the page:
+
+1. **Direct mode only.** The hub uses `Peripheral`. A browser can't advertise or (normally) scan, so never use `Beacon` or `Scanner` with a web page.
+2. **The protocol** (spikecomm's `Peripheral` is a Nordic UART Service): service `6e400001-b5a3-f393-e0a9-e50e24dcca9e`. The page **writes** to characteristic `6e400002-b5a3-f393-e0a9-e50e24dcca9e` (it arrives in the hub's `listen()` callback) and gets **notifications** from `6e400003-b5a3-f393-e0a9-e50e24dcca9e` (whatever the hub `send()`s). Every message is UTF-8 text ending in `"\n"`.
+3. **At most 20 bytes per write.** Encode `text + "\n"` and write it in 20-byte slices; the hub joins them up to the `"\n"`.
+4. **One write at a time.** Starting a write before the previous one finished fails with `NetworkError: GATT operation already in progress`. Chain sends on a promise queue as in Template 7. When keys drive the hub, send only when the command changes (skip `keydown` events with `event.repeat`).
+5. **Collect notifications until a `"\n"`:** decode with one `TextDecoder` using `{ stream: true }`, split on `"\n"`, and keep the last, unfinished piece for next time.
+6. **Call `navigator.bluetooth.requestDevice()` from a click handler**, never when the page loads. Filter with `{ services: [SERVICE] }` (lists every spikecomm `Peripheral` nearby), or with `{ namePrefix: "Car" }` **plus** `optionalServices: [SERVICE]`.
+7. **Opening the file directly works** (double-click; Chrome allows Bluetooth for `file://` pages). On a website the page must be `https://` (or `http://localhost`).
+8. **Make the hub safe when the page goes away** (tab closed, out of range): stop motors when `p.is_connected` is `False` in the main loop, or in `on_disconnect`. If holding a key drives the robot, also send a stop on `keyup` and on the window's `blur`.
+
+### 7. A web page sends and receives messages
+
+The hub prints each message, replies, and reacts to `"smile"`; it also sends on its own when its left button is pressed. The page shows everything (and logs it to the browser console).
+
+```python
+# ===== Hub ===== (examples/web_drive/simple.py)
+from spikecomm import Peripheral
+from hub import button, light_matrix
+import time
+
+p = Peripheral("Hub1")      # the name the browser shows: give every hub its own
+p.advertise()
+
+
+def on_message(msg):
+    # Runs each time the web page sends a message
+    print("Received:", msg)
+    if msg == "smile":
+        light_matrix.show_image(light_matrix.IMAGE_HAPPY)
+    p.send("Hub got: " + msg)       # reply to the page
+
+
+p.listen(on_message)
+print("Waiting for the web page ...")
+
+while True:
+    # The hub can send on its own too: tell the page when the left button is pressed
+    if button.pressed(button.LEFT):
+        p.send("Left button pressed")
+        while button.pressed(button.LEFT):      # wait until it's let go
+            time.sleep_ms(20)
+    time.sleep_ms(20)
+```
+
+```html
+<!-- ===== Web page ===== (examples/web_drive/simple.html) -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>SPIKE Simple Messages</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 600px; margin: 2em auto; padding: 0 16px; }
+  pre { border: 1px solid #8888; padding: 8px; min-height: 10em; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+  <h1>Talk to a SPIKE hub</h1>
+  <button id="connect">Connect</button>
+  <form id="form">
+    <p><input id="message" value="smile"> <button>Send</button></p>
+  </form>
+  <pre id="output"></pre>
+
+<script>
+// spikecomm's Peripheral is a Nordic UART Service (NUS)
+const SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const TO_HUB  = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";   // write here: the hub's listen() callback gets it
+const TO_PAGE = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";   // the hub's send() arrives here
+
+let toHub = null;    // set once connected
+
+function show(text) {
+  console.log(text);
+  document.getElementById("output").textContent += text + "\n";
+}
+
+// Runs once for each message from the hub: react to it here
+function onMessage(text) {
+  show("Hub: " + text);
+}
+
+async function connect() {
+  const device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE] }] });
+  device.addEventListener("gattserverdisconnected", () => { toHub = null; show("Disconnected"); });
+  const server = await device.gatt.connect();
+  const service = await server.getPrimaryService(SERVICE);
+  const toPage = await service.getCharacteristic(TO_PAGE);
+  toPage.addEventListener("characteristicvaluechanged", onData);
+  await toPage.startNotifications();
+  toHub = await service.getCharacteristic(TO_HUB);
+  show("Connected to " + device.name);
+}
+
+// Every message ends with "\n". A long one can arrive in pieces,
+// so collect text until a "\n" comes.
+const decoder = new TextDecoder();
+let partial = "";
+function onData(event) {
+  partial += decoder.decode(event.target.value, { stream: true });
+  const lines = partial.split("\n");
+  partial = lines.pop();     // an unfinished message waits for its next piece
+  for (const line of lines) onMessage(line);
+}
+
+// Send text plus "\n" in writes of at most 20 bytes. The browser allows only
+// one write at a time, so each send waits for the one before it.
+let queue = Promise.resolve();
+function send(text) {
+  queue = queue.then(async () => {
+    if (!toHub) return show("Not connected");
+    show("Me: " + text);
+    const bytes = new TextEncoder().encode(text + "\n");
+    for (let i = 0; i < bytes.length; i += 20) {
+      await toHub.writeValueWithResponse(bytes.slice(i, i + 20));
+    }
+  }).catch((e) => show("Error: " + e.message));
+}
+
+document.getElementById("connect").onclick = () => connect().catch((e) => show("Error: " + e.message));
+document.getElementById("form").onsubmit = (event) => {
+  event.preventDefault();    // stay on this page
+  send(document.getElementById("message").value);
+};
+</script>
+</body>
+</html>
+```
+
+To control the hub, call `send(...)` from buttons or keys, e.g. `send("forward;500")`, and split the message on the hub with `decode(msg)` (→ `["forward", 500]`). React to the hub's messages inside `onMessage`.
+
 ## Common problems → fixes
 
 | Symptom | Likely cause / fix |
@@ -308,6 +447,12 @@ while True:
 | One message arrives as two | It contained `"\n"`. Remove newlines; use `encode(...)` for several values. |
 | `wait_for` hangs | Called inside a callback, or no timeout and the message came before the call. |
 | Robot keeps driving after the controller stops | Add `on_disconnect` on the Peripheral that stops the motors. |
+| Hub isn't in the browser's device list | Hub program not running, or started with the Run button; another page or hub is already connected to it (one Central at a time); the page's name filter doesn't match. |
+| `navigator.bluetooth` is `undefined` | Safari, Firefox, or a browser on iPhone/iPad: use Chrome or Edge. On a website the page must be `https://`. |
+| `SecurityError: Failed to execute 'requestDevice' on 'Bluetooth': Must be handling a user gesture to show a permission request.` | `requestDevice()` ran when the page loaded; call it from a button's click handler. |
+| `SecurityError: Origin is not allowed to access any service.` | The page filters by name: add `optionalServices: [SERVICE]` to `requestDevice()`. |
+| `NetworkError: GATT operation already in progress.` | Two writes at once: queue them (Template 7's `send`). |
+| `NotFoundError: User cancelled the requestDevice() chooser.` | The device list was closed without picking a hub. |
 
 ## SPIKE App 3 hub API cheat sheet (names verified on the hub)
 

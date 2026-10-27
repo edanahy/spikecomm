@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>SPIKE Simple Messages</title>
+<!-- The smallest web page that sends and receives messages with a hub running
+     simple.py (a spikecomm Peripheral). Use Chrome or Edge, not Safari or Firefox. -->
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 600px; margin: 2em auto; padding: 0 16px; }
+  pre { border: 1px solid #8888; padding: 8px; min-height: 10em; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+  <h1>Talk to a SPIKE hub</h1>
+  <button id="connect">Connect</button>
+  <form id="form">
+    <p><input id="message" value="smile"> <button>Send</button></p>
+  </form>
+  <pre id="output"></pre>
+
+<script>
+// spikecomm's Peripheral is a Nordic UART Service (NUS)
+const SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const TO_HUB  = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";   // write here: the hub's listen() callback gets it
+const TO_PAGE = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";   // the hub's send() arrives here
+
+let toHub = null;    // set once connected
+
+function show(text) {
+  console.log(text);
+  document.getElementById("output").textContent += text + "\n";
+}
+
+// Runs once for each message from the hub: react to it here
+function onMessage(text) {
+  show("Hub: " + text);
+}
+
+async function connect() {
+  const device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE] }] });
+  device.addEventListener("gattserverdisconnected", () => { toHub = null; show("Disconnected"); });
+  const server = await device.gatt.connect();
+  const service = await server.getPrimaryService(SERVICE);
+  const toPage = await service.getCharacteristic(TO_PAGE);
+  toPage.addEventListener("characteristicvaluechanged", onData);
+  await toPage.startNotifications();
+  toHub = await service.getCharacteristic(TO_HUB);
+  show("Connected to " + device.name);
+}
+
+// Every message ends with "\n". A long one can arrive in pieces,
+// so collect text until a "\n" comes.
+const decoder = new TextDecoder();
+let partial = "";
+function onData(event) {
+  partial += decoder.decode(event.target.value, { stream: true });
+  const lines = partial.split("\n");
+  partial = lines.pop();     // an unfinished message waits for its next piece
+  for (const line of lines) onMessage(line);
+}
+
+// Send text plus "\n" in writes of at most 20 bytes. The browser allows only
+// one write at a time, so each send waits for the one before it.
+let queue = Promise.resolve();
+function send(text) {
+  queue = queue.then(async () => {
+    if (!toHub) return show("Not connected");
+    show("Me: " + text);
+    const bytes = new TextEncoder().encode(text + "\n");
+    for (let i = 0; i < bytes.length; i += 20) {
+      await toHub.writeValueWithResponse(bytes.slice(i, i + 20));
+    }
+  }).catch((e) => show("Error: " + e.message));
+}
+
+document.getElementById("connect").onclick = () => connect().catch((e) => show("Error: " + e.message));
+document.getElementById("form").onsubmit = (event) => {
+  event.preventDefault();    // stay on this page
+  send(document.getElementById("message").value);
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SPIKE Web Drive</title>
+<!--
+  Drive a SPIKE Prime car from the browser over Bluetooth (Web Bluetooth).
+  The hub runs main.py from this folder: a spikecomm Peripheral. This page is
+  the Central: it connects to the hub and sends "move;speed" messages, e.g.
+  "forward;500". The hub echoes each one back.
+
+  Works in Chrome or Edge (computer or Android), not Safari or Firefox.
+  Everything is in this one file, so it works offline.
+-->
+<style>
+  :root {
+    --bg: #f3f4f6;
+    --panel: #ffffff;
+    --text: #1c2230;
+    --muted: #5c6475;
+    --border: #d6dae1;
+    --key: #ffffff;
+    --key-edge: #c3c8d1;
+    --accent: #1f5fd6;
+    --accent-soft: #d6e3fb;
+    --accent-text: #ffffff;
+    --stop: #c62828;
+    --stop-soft: #f9dcdc;
+    --ok: #18794e;
+    --busy: #a35c00;
+    --off: #8a91a0;
+    --code-bg: #eceef2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #111318;
+      --panel: #1a1d24;
+      --text: #e6e8ec;
+      --muted: #9aa1ae;
+      --border: #2e333d;
+      --key: #242833;
+      --key-edge: #11141a;
+      --accent: #5b8ff0;
+      --accent-soft: #233456;
+      --accent-text: #0c1220;
+      --stop: #ef6b6b;
+      --stop-soft: #4a2326;
+      --ok: #4cc38a;
+      --busy: #e0a23a;
+      --off: #6b7280;
+      --code-bg: #242833;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #111318;
+    --panel: #1a1d24;
+    --text: #e6e8ec;
+    --muted: #9aa1ae;
+    --border: #2e333d;
+    --key: #242833;
+    --key-edge: #11141a;
+    --accent: #5b8ff0;
+    --accent-soft: #233456;
+    --accent-text: #0c1220;
+    --stop: #ef6b6b;
+    --stop-soft: #4a2326;
+    --ok: #4cc38a;
+    --busy: #e0a23a;
+    --off: #6b7280;
+    --code-bg: #242833;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: 24px 16px 48px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+  h1 { margin: 0; font-size: 1.5rem; }
+  h2 { margin: 0 0 8px; font-size: 1rem; }
+  header p { margin: 4px 0 0; color: var(--muted); }
+  code {
+    background: var(--code-bg);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 0.9em;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+  }
+  .hint { margin: 8px 0 0; font-size: 0.875rem; color: var(--muted); }
+
+  /* Connection */
+  label[for="name"] { display: block; font-weight: 600; margin-bottom: 6px; }
+  .row { display: flex; gap: 8px; }
+  #name {
+    flex: 1;
+    min-width: 0;
+    font: inherit;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--text);
+  }
+  #connect {
+    font: inherit;
+    font-weight: 600;
+    padding: 8px 18px;
+    border: 0;
+    border-radius: 8px;
+    background: var(--accent);
+    color: var(--accent-text);
+    cursor: pointer;
+  }
+  #connect:disabled { opacity: 0.5; cursor: default; }
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 12px 0 0;
+    font-weight: 600;
+  }
+  .status::before {
+    content: "";
+    width: 10px;
+    height: 10px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--off);
+  }
+  .status[data-state="connected"]::before { background: var(--ok); }
+  .status[data-state="busy"]::before { background: var(--busy); }
+  .status[data-state="error"]::before { background: var(--stop); }
+
+  /* Keypad */
+  .pad {
+    display: grid;
+    grid-template-columns: repeat(3, 88px);
+    grid-template-areas:
+      ".     w     ."
+      "a     s     d"
+      "space space space";
+    gap: 10px;
+    justify-content: center;
+    margin: 4px 0 16px;
+  }
+  .key {
+    height: 88px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    font: inherit;
+    color: var(--text);
+    background: var(--key);
+    border: 1px solid var(--border);
+    border-bottom: 5px solid var(--key-edge);
+    border-radius: 14px;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+    transition: transform 60ms;
+  }
+  .key b { font-size: 1.6rem; line-height: 1; }
+  .key span { font-size: 0.8rem; color: var(--muted); }
+  .key[data-move="stop"] { height: 60px; }
+  .key[data-move="stop"] b { font-size: 1.1rem; }
+  .key.active {
+    transform: translateY(3px);
+    border-bottom-width: 2px;
+    background: var(--accent-soft);
+    border-color: var(--accent);
+  }
+  .key.active.confirmed { background: var(--accent); }
+  .key.active.confirmed b, .key.active.confirmed span { color: var(--accent-text); }
+  .key[data-move="stop"].active { background: var(--stop-soft); border-color: var(--stop); }
+  .key[data-move="stop"].active.confirmed { background: var(--stop); }
+  .offline .key { opacity: 0.45; }
+
+  .controls { display: grid; gap: 12px; }
+  .speed { display: flex; align-items: center; gap: 12px; }
+  .speed label { font-weight: 600; white-space: nowrap; }
+  .speed input { flex: 1; min-width: 0; accent-color: var(--accent); }
+  .speed output { min-width: 4.5em; text-align: right; font-variant-numeric: tabular-nums; }
+  .check { display: flex; align-items: center; gap: 8px; }
+  .check input { accent-color: var(--accent); width: 18px; height: 18px; }
+  .doing { margin: 0; }
+
+  /* Message log */
+  #log {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    max-height: 180px;
+    overflow-y: auto;
+    font: 0.85rem/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  #log li { display: flex; gap: 10px; }
+  #log time { color: var(--muted); flex: none; }
+  #log .error { color: var(--stop); }
+  #log:empty::before { content: "Nothing sent yet."; color: var(--muted); font-family: system-ui, sans-serif; }
+
+  @media (max-width: 400px) {
+    .pad { grid-template-columns: repeat(3, 1fr); }
+    .key { height: 76px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>SPIKE Web Drive</h1>
+    <p>Drive a SPIKE Prime car over Bluetooth. The hub runs <code>main.py</code> from this folder.</p>
+  </header>
+
+  <section class="panel">
+    <label for="name">Hub name starts with</label>
+    <div class="row">
+      <input id="name" value="Car" spellcheck="false" autocomplete="off">
+      <button id="connect" type="button">Connect</button>
+    </div>
+    <p class="hint">Use the <code>NAME</code> from <code>main.py</code>. Hub not in the list? Clear the box to list every spikecomm hub nearby.</p>
+    <p id="status" class="status" role="status">Not connected</p>
+  </section>
+
+  <section class="panel offline" id="drive">
+    <div class="pad" id="pad">
+      <button class="key" type="button" data-move="forward" style="grid-area: w"><b>W</b><span>Forward</span></button>
+      <button class="key" type="button" data-move="left" style="grid-area: a"><b>A</b><span>Left</span></button>
+      <button class="key" type="button" data-move="back" style="grid-area: s"><b>S</b><span>Back</span></button>
+      <button class="key" type="button" data-move="right" style="grid-area: d"><b>D</b><span>Right</span></button>
+      <button class="key" type="button" data-move="stop" style="grid-area: space"><b>Space</b><span>Stop</span></button>
+    </div>
+    <div class="controls">
+      <div class="speed">
+        <label for="speed">Speed</label>
+        <input id="speed" type="range" min="100" max="1000" step="50" value="500">
+        <output id="speed-out" for="speed">500 °/s</output>
+      </div>
+      <label class="check"><input id="hold" type="checkbox"> Stop when I let go of the key</label>
+      <p class="doing">Hub is doing: <strong id="doing">—</strong></p>
+    </div>
+    <p class="hint">Arrow keys work too. A key turns solid once the hub confirms the command.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Messages</h2>
+    <ol id="log"></ol>
+  </section>
+</main>
+
+<script>
+// spikecomm's Peripheral is a Nordic UART Service: one characteristic to write
+// to (the hub's listen() callback gets it) and one that notifies us (whatever
+// the hub's send() sends). Every message ends with "\n".
+const UART_SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const UART_RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";   // page -> hub
+const UART_TX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";   // hub -> page
+const PACKET_BYTES = 20;   // the most every Bluetooth link carries in one write
+
+// Keyboard key (by position, so it works on any layout) -> move
+const KEYS = {
+  KeyW: "forward", ArrowUp: "forward",
+  KeyA: "left", ArrowLeft: "left",
+  KeyS: "back", ArrowDown: "back",
+  KeyD: "right", ArrowRight: "right",
+  Space: "stop",
+};
+const LABELS = { forward: "Forward", left: "Left", back: "Back", right: "Right", stop: "Stop" };
+
+const $ = (id) => document.getElementById(id);
+const nameInput = $("name"), connectButton = $("connect"), statusLine = $("status");
+const drivePanel = $("drive"), speedInput = $("speed"), speedOut = $("speed-out");
+const holdBox = $("hold"), doingLine = $("doing"), logList = $("log");
+const keyButtons = document.querySelectorAll(".key");
+
+let device = null;     // the hub we picked
+let rx = null;         // where we write messages; null when not connected
+let move = "stop";     // the move we last asked for
+let confirmed = null;  // the last message the hub echoed back
+let sentAt = {};       // message -> when we sent it, to time the echo
+
+// ── Connecting ───────────────────────────────────────────────────────────────
+
+function setStatus(text, state = "") {
+  statusLine.textContent = text;
+  statusLine.dataset.state = state;
+}
+
+async function connect() {
+  if (navigator.bluetooth.getAvailability && !(await navigator.bluetooth.getAvailability())) {
+    setStatus("Bluetooth is off, or this browser isn't allowed to use it.", "error");
+    return;
+  }
+  const prefix = nameInput.value.trim();
+  try {
+    device = await navigator.bluetooth.requestDevice({
+      filters: prefix ? [{ namePrefix: prefix }] : [{ services: [UART_SERVICE] }],
+      optionalServices: [UART_SERVICE],
+    });
+  } catch (e) {
+    setStatus(e.name === "NotFoundError" ? "No hub chosen." : e.message, "error");
+    return;
+  }
+  setStatus(`Connecting to ${device.name || "hub"}…`, "busy");
+  connectButton.disabled = true;
+  try {
+    device.ongattserverdisconnected = onDisconnected;
+    const server = await device.gatt.connect();
+    const service = await server.getPrimaryService(UART_SERVICE);
+    const tx = await service.getCharacteristic(UART_TX);
+    tx.oncharacteristicvaluechanged = onNotify;
+    await tx.startNotifications();
+    rx = await service.getCharacteristic(UART_RX);
+  } catch (e) {
+    setStatus(`Couldn't connect: ${e.message}`, "error");
+    logLine(`Couldn't connect: ${e.message}`, true);
+    if (device.gatt.connected) device.gatt.disconnect();
+    connectButton.disabled = false;
+    return;
+  }
+  incoming = "";
+  move = "stop";
+  confirmed = null;
+  setStatus(`Connected to ${device.name || "hub"}`, "connected");
+  logLine(`Connected to ${device.name || "hub"}`);
+  connectButton.textContent = "Disconnect";
+  connectButton.disabled = false;
+  drivePanel.classList.remove("offline");
+  showMove();
+}
+
+function onDisconnected() {
+  const wasConnected = rx !== null;
+  rx = null;
+  move = "stop";
+  confirmed = null;
+  connectButton.textContent = "Connect";
+  connectButton.disabled = false;
+  drivePanel.classList.add("offline");
+  showMove();
+  if (wasConnected) {
+    setStatus(`Disconnected from ${device.name || "hub"}. Click Connect to drive again.`);
+    logLine("Disconnected");
+  }
+}
+
+connectButton.addEventListener("click", () => {
+  connectButton.blur();   // so Space stops the car instead of clicking this button
+  if (rx) device.gatt.disconnect();   // the hub stops its motors when we leave
+  else connect();
+});
+
+// ── Sending and receiving ────────────────────────────────────────────────────
+
+const encoder = new TextEncoder();
+let sending = false;
+let waiting = null;    // the newest message not sent yet
+
+// The browser does one Bluetooth write at a time. Only the newest drive command
+// matters, so if several pile up while one is being sent, the older ones are skipped.
+async function send(message) {
+  waiting = message;
+  if (sending) return;
+  sending = true;
+  try {
+    while (waiting !== null && rx) {
+      const text = waiting;
+      waiting = null;
+      sentAt[text] = performance.now();
+      logLine(`→ ${text}`);
+      const bytes = encoder.encode(text + "\n");
+      for (let i = 0; i < bytes.length; i += PACKET_BYTES) {
+        await rx.writeValueWithResponse(bytes.slice(i, i + PACKET_BYTES));
+      }
+    }
+  } catch (e) {
+    if (rx) logLine(`Send failed: ${e.message}`, true);   // (not when we just disconnected)
+  } finally {
+    sending = false;
+    waiting = null;
+  }
+}
+
+const decoder = new TextDecoder();
+let incoming = "";     // received text that doesn't end with "\n" yet
+
+function onNotify(event) {
+  incoming += decoder.decode(event.target.value, { stream: true });
+  const lines = incoming.split("\n");
+  incoming = lines.pop();
+  for (const line of lines) received(line);
+}
+
+function received(message) {
+  const ms = message in sentAt ? ` (${Math.round(performance.now() - sentAt[message])} ms)` : "";
+  delete sentAt[message];
+  logLine(`← ${message}${ms}`);
+  if (message.split(";")[0] in LABELS) {   // the hub echoing a move back
+    confirmed = message;
+    showMove();
+  }
+}
+
+// ── Driving ──────────────────────────────────────────────────────────────────
+
+function command() {
+  return `${move};${speedInput.value}`;
+}
+
+function press(newMove) {
+  if (!rx) {
+    setStatus(device ? "Not connected. Click Connect first." : "Click Connect and pick your hub first.", "error");
+    return;
+  }
+  move = newMove;
+  showMove();
+  send(command());
+}
+
+function release(oldMove) {
+  if (holdBox.checked && move === oldMove && move !== "stop") press("stop");
+}
+
+function showMove() {
+  const sent = rx ? command() : null;
+  for (const key of keyButtons) {
+    const on = rx !== null && key.dataset.move === move;
+    key.classList.toggle("active", on);
+    key.classList.toggle("confirmed", on && confirmed === sent);
+  }
+  const [hubMove, hubSpeed] = (confirmed || "").split(";");
+  doingLine.textContent = !rx || !confirmed ? "—"
+    : hubMove === "stop" ? "Stop" : `${LABELS[hubMove] || hubMove} at ${hubSpeed} °/s`;
+}
+
+document.addEventListener("keydown", (e) => {
+  const m = KEYS[e.code];
+  if (!m || e.target === nameInput || e.ctrlKey || e.metaKey || e.altKey) return;
+  e.preventDefault();   // no scrolling, no clicking a focused button with Space
+  if (!e.repeat) press(m);
+});
+
+document.addEventListener("keyup", (e) => {
+  const m = KEYS[e.code];
+  if (!m || e.target === nameInput) return;
+  e.preventDefault();
+  release(m);
+});
+
+// A key let go while the window isn't in front never reaches the page
+window.addEventListener("blur", () => release(move));
+
+for (const key of keyButtons) {
+  const m = key.dataset.move;
+  key.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    key.setPointerCapture(e.pointerId);
+    press(m);
+  });
+  key.addEventListener("pointerup", () => release(m));
+  key.addEventListener("pointercancel", () => release(m));
+  key.addEventListener("click", (e) => { if (e.detail === 0) press(m); });   // Enter on a focused key
+}
+
+speedInput.addEventListener("input", () => {
+  speedOut.textContent = `${speedInput.value} °/s`;
+  if (rx && move !== "stop") {
+    showMove();
+    send(command());
+  }
+});
+
+// ── Log ──────────────────────────────────────────────────────────────────────
+
+function logLine(text, isError = false) {
+  const li = document.createElement("li");
+  const time = document.createElement("time");
+  time.textContent = new Date().toLocaleTimeString();
+  const span = document.createElement("span");
+  span.textContent = text;
+  if (isError) span.className = "error";
+  li.append(time, span);
+  logList.append(li);
+  while (logList.children.length > 100) logList.firstChild.remove();
+  logList.scrollTop = logList.scrollHeight;
+}
+
+// ── Can this browser do it? ──────────────────────────────────────────────────
+
+if (!window.isSecureContext) {
+  setStatus("Bluetooth needs this page on https:// or http://localhost.", "error");
+  connectButton.disabled = true;
+} else if (!navigator.bluetooth) {
+  setStatus("This browser can't use Bluetooth. Use Chrome or Edge (not Safari or Firefox).", "error");
+  connectButton.disabled = true;
+}
+</script>
+</body>
+</html>

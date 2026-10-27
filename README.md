@@ -3,9 +3,9 @@
 **Bluetooth communication library for LEGO SPIKE Prime**
 *Single-file MicroPython module — copy to hub, import, go.*
 
-`spikecomm` makes it easy for LEGO SPIKE Prime hubs to talk to each other over Bluetooth. It supports two communication styles — **Beacon mode** (broadcast, no connection needed) and **Direct mode** (full BLE connection, two-way messaging) — with a consistent, student-friendly API across both.
+`spikecomm` makes it easy for LEGO SPIKE Prime hubs to talk to each other over Bluetooth. It supports two communication styles — **Beacon mode** (broadcast, no connection needed) and **Direct mode** (full BLE connection, two-way messaging) — with a consistent, student-friendly API across both. A hub can also talk to a **web page** in Chrome or Edge: see [Talking to a Web Page](#talking-to-a-web-page).
 
-**Works with:** SPIKE Prime hubs running the **SPIKE App 3** firmware (the Python in the current LEGO Education SPIKE App). Tested hub-to-hub on firmware built 2025-03-27 (MicroPython 1.24 core, hub OS 1.8.149).
+**Works with:** SPIKE Prime hubs running the **SPIKE App 3** firmware (the Python in the current LEGO Education SPIKE App). Tested hub-to-hub on firmware built 2025-03-27 (MicroPython 1.24 core, hub OS 1.8.149), and hub-to-web-page with Chrome 156 on macOS.
 
 > **Important:** start spikecomm programs from the hub's **REPL** over USB, not with the SPIKE App's Run button or the hub's program menu — the firmware blocks Bluetooth for programs the hub starts itself. Once started, a program keeps running after you unplug the USB cable. See [Running spikecomm programs](#running-spikecomm-programs).
 
@@ -23,8 +23,9 @@
 8. [Callback Rules](#callback-rules)
 9. [Debugging with `verbose=True`](#debugging-with-verbosetrue)
 10. [Complete Examples](#complete-examples)
-11. [API Quick Reference](#api-quick-reference)
-12. [Limitations and Tips](#limitations-and-tips)
+11. [Talking to a Web Page](#talking-to-a-web-page) — Web Bluetooth in Chrome or Edge
+12. [API Quick Reference](#api-quick-reference)
+13. [Limitations and Tips](#limitations-and-tips)
 
 ---
 
@@ -94,6 +95,8 @@ To stop it, plug the cable back in and press **Ctrl-C**. When you're done, press
 | **Best for** | Sensor broadcasts, groups of 3+ hubs | Commands, responses, text |
 
 **Rule of thumb:** Use Beacon/Scanner when you're sharing sensor readings or status with any number of hubs (each hub can broadcast *and* listen at the same time). Use Peripheral/Central when two specific hubs need every message to arrive, like commands.
+
+**Talking to a web page?** The hub runs a `Peripheral` and the page connects to it; a page can't use Beacon mode. See [Talking to a Web Page](#talking-to-a-web-page).
 
 ---
 
@@ -879,6 +882,111 @@ The `examples/` folder has complete Hub A / Hub B program pairs, tested on real 
 |---|---|
 | `tilt_arrow_hubA.py`, `tilt_arrow_hubB.py` | Tilt Hub A; Hub B's screen shows an arrow pointing the way Hub A leans. No sensors or motors needed. |
 | `distance_spin_hubA.py`, `distance_spin_hubB.py` | Hub A broadcasts its distance-sensor reading (sensor on port A). When something comes closer than 50 cm, Hub B spins its motor (port A) 3 times, then waits for the object to move away before it can go again. Both screens show the distance as a bar; Hub B shows a turning arrow while it spins, a check mark when done, and an X if it loses Hub A. |
+| `web_drive/simple.py` + `simple.html`, `web_drive/main.py` + `index.html` | A hub and a web page talking to each other; see [Talking to a Web Page](#talking-to-a-web-page). |
+
+---
+
+## Talking to a Web Page
+
+A hub running a `Peripheral` can also talk to a **web page**, using the Web Bluetooth built into Chrome and Edge. The page plays the part of the `Central`: it connects to the hub, sends messages that arrive in the hub's `listen()` callback, and receives whatever the hub `send()`s. The hub program is ordinary Direct-mode code, started from the REPL as usual.
+
+- **Browsers:** Chrome or Edge on a computer, Chromebook, or Android phone or tablet. Safari, Firefox, and browsers on iPhone/iPad don't have Web Bluetooth.
+- **Opening the page:** double-clicking the `.html` file works in Chrome. A page on a website must use `https://` (or `http://localhost`).
+- **Direct mode only:** a browser can't broadcast, so a page can't be a `Beacon`, and listening for Beacons isn't available in normal browsers.
+- **Speed:** with Chrome on a Mac, a message plus the hub's reply took about 40–65 ms.
+
+### Try it
+
+The `examples/web_drive/` folder has two hub + page pairs, tested on a real hub with Chrome:
+
+| Files | What it does |
+|---|---|
+| `simple.py` + `simple.html` | The smallest example. Type a message in the page; the hub prints it, replies, and smiles when the message is `smile`. Press the hub's left button and the page shows it. |
+| `main.py` + `index.html` | Drive a car (motors on ports A and B) with W A S D or the arrow keys and Space to stop, with a speed slider, an option to stop when you let go of the key, and a message log. The hub stops the motors if the page disconnects. |
+
+1. Start the hub program from the REPL, e.g. `mpremote run simple.py`. You can then unplug the USB cable.
+2. Open `simple.html` in Chrome or Edge and click **Connect**. Pick your hub in the list.
+3. Type a message and press **Send**.
+
+### Writing your own page
+
+spikecomm's `Peripheral` is a standard Bluetooth *Nordic UART Service*. A page needs:
+
+| | |
+|---|---|
+| Service | `6e400001-b5a3-f393-e0a9-e50e24dcca9e` |
+| Page → hub | write to characteristic `6e400002-b5a3-f393-e0a9-e50e24dcca9e` |
+| Hub → page | notifications from characteristic `6e400003-b5a3-f393-e0a9-e50e24dcca9e` |
+| Messages | UTF-8 text, each ending with `"\n"` |
+
+and three rules:
+
+- **Write at most 20 bytes at a time.** Split longer messages; the hub joins the pieces up to the `"\n"`.
+- **One write at a time.** Starting a write before the last one has finished fails with `NetworkError: GATT operation already in progress`, so queue them.
+- **Collect what arrives until a `"\n"`.** A long message from the hub can come in several pieces.
+
+This is the JavaScript from `simple.html`, which does all of that:
+
+```js
+const SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const TO_HUB  = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";   // write here: the hub's listen() callback gets it
+const TO_PAGE = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";   // the hub's send() arrives here
+
+let toHub = null;    // set once connected
+
+function show(text) {
+  console.log(text);
+  document.getElementById("output").textContent += text + "\n";
+}
+
+// Runs once for each message from the hub: react to it here
+function onMessage(text) {
+  show("Hub: " + text);
+}
+
+async function connect() {
+  const device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE] }] });
+  device.addEventListener("gattserverdisconnected", () => { toHub = null; show("Disconnected"); });
+  const server = await device.gatt.connect();
+  const service = await server.getPrimaryService(SERVICE);
+  const toPage = await service.getCharacteristic(TO_PAGE);
+  toPage.addEventListener("characteristicvaluechanged", onData);
+  await toPage.startNotifications();
+  toHub = await service.getCharacteristic(TO_HUB);
+  show("Connected to " + device.name);
+}
+
+// Every message ends with "\n". A long one can arrive in pieces,
+// so collect text until a "\n" comes.
+const decoder = new TextDecoder();
+let partial = "";
+function onData(event) {
+  partial += decoder.decode(event.target.value, { stream: true });
+  const lines = partial.split("\n");
+  partial = lines.pop();     // an unfinished message waits for its next piece
+  for (const line of lines) onMessage(line);
+}
+
+// Send text plus "\n" in writes of at most 20 bytes. The browser allows only
+// one write at a time, so each send waits for the one before it.
+let queue = Promise.resolve();
+function send(text) {
+  queue = queue.then(async () => {
+    if (!toHub) return show("Not connected");
+    show("Me: " + text);
+    const bytes = new TextEncoder().encode(text + "\n");
+    for (let i = 0; i < bytes.length; i += 20) {
+      await toHub.writeValueWithResponse(bytes.slice(i, i + 20));
+    }
+  }).catch((e) => show("Error: " + e.message));
+}
+```
+
+`requestDevice()` opens the browser's list of hubs, so call it from a button click (`connect` above is wired to the Connect button), not when the page loads. Filtering by `services` lists every hub running a spikecomm `Peripheral`. To filter by name instead, use `{ filters: [{ namePrefix: "Car" }], optionalServices: [SERVICE] }`; without `optionalServices` Chrome refuses with `Origin is not allowed to access any service`.
+
+To send several values, use the same `"forward;500"` style as `encode()` and split it on the hub with `decode(msg)`.
+
+Other programs that speak the Nordic UART Service, such as the `bleak` library for Python on a computer, can connect the same way, but only Chrome has been tested.
 
 ---
 
@@ -960,7 +1068,7 @@ A Scanner hears each Beacon about 10 times per second. If a Beacon changes its v
 A hub can run a `Beacon` *or* a `Peripheral` (both advertise), but not both. A `Beacon` plus any number of `Scanner`s on one hub is fine.
 
 **One Central per Peripheral**
-A Peripheral talks to one Central at a time; when it disconnects, the Peripheral advertises again so another Central can connect. For groups of three or more hubs, Beacon mode is usually simpler.
+A Peripheral talks to one Central at a time; when it disconnects, the Peripheral advertises again so another Central can connect. A web page counts as a Central. For groups of three or more hubs, Beacon mode is usually simpler.
 
 **Message size and speed (Direct mode)**
 Messages can be up to 1000 characters. Over the air they travel in 20-character packets, so short messages are fastest. In testing, a Central sent 100 short messages back-to-back in about a quarter of a second, all arriving in order — so sending a short message every 20–50 ms is fine. If you send faster than the radio can keep up, `send()` waits a moment for it. Messages sent from *inside a callback* are queued and go out more slowly (about 15 per second); if that queue fills up, `send()` drops the message, prints a warning, and returns `False`.
@@ -1005,6 +1113,7 @@ The SPIKE App's Run button and the hub's program menu don't work with spikecomm 
 
 **Not yet tested**
 - Two Centrals or two Peripherals on the same hub.
+- Web pages in Edge, or on Windows, Chromebooks or Android (tested: Chrome on macOS); other Nordic UART programs such as Python's `bleak`.
 
 **Debugging workflow**
 Start with `verbose=True` on all objects, confirm the correct data is being sent and received, then set `verbose=False` before running the final program.
