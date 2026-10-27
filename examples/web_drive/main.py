@@ -7,7 +7,12 @@
 #   1. Start this program from the REPL over USB, e.g. `mpremote run main.py`
 #      (not with the SPIKE App's Run button: programs it starts can't use
 #      Bluetooth). Once it says it's waiting you can unplug the cable.
-#   2. Open index.html in Chrome or Edge, click Connect and pick NAME below.
+#   2. Open index.html in Chrome or Edge, click Connect and pick your hub.
+#      The list shows it as SPIKE or by the hub's own name (the one it has in
+#      the SPIKE App): once a computer has connected to a hub, the browser
+#      may keep using that name.
+#   3. Press Ctrl-C in the REPL to stop: the car stops, the page is
+#      disconnected and the hub stops advertising.
 #
 # Hub screen:
 #   X       no web page connected (motors stopped)
@@ -18,7 +23,6 @@ from hub import port, light_matrix
 import motor
 import time
 
-NAME = "Car1"           # what the web page looks for: give every car its own name
 LEFT_MOTOR = port.A
 RIGHT_MOTOR = port.B
 # On most cars the two motors face opposite ways, so one turns backwards to
@@ -43,7 +47,7 @@ PICTURES = {
     "stop":    light_matrix.IMAGE_YES,
 }
 
-p = Peripheral(NAME)
+p = Peripheral()        # advertises as "SPIKE"
 p.advertise()
 
 latest = {"move": "stop", "speed": 0}
@@ -60,7 +64,7 @@ def on_command(msg):
 
 
 p.listen(on_command)
-print("Waiting for the web page to connect to", NAME, "...")
+print("Waiting for the web page to connect ...")
 
 
 def drive(move, speed):
@@ -74,19 +78,29 @@ def drive(move, speed):
 
 
 shown = None            # what the motors and screen are doing now
-while True:
-    connected = p.is_connected
-    if not connected:
-        latest["move"] = "stop"     # page closed or out of range: stop the car
-    now = (latest["move"], latest["speed"], connected)
-    if now != shown:
-        move, speed, connected = now
-        drive(move, speed)
-        if connected:
-            light_matrix.show_image(PICTURES[move])
-            print("Move:", move, "at", speed, "deg/s")
-        else:
-            light_matrix.show_image(light_matrix.IMAGE_NO)
-            print("No web page connected")
-        shown = now
-    time.sleep_ms(20)
+try:
+    while True:
+        connected = p.is_connected
+        if not connected:
+            latest["move"] = "stop"     # page closed or out of range: stop the car
+        now = (latest["move"], latest["speed"], connected)
+        if now != shown:
+            move, speed, connected = now
+            drive(move, speed)
+            if connected:
+                light_matrix.show_image(PICTURES[move])
+                print("Move:", move, "at", speed, "deg/s")
+            else:
+                light_matrix.show_image(light_matrix.IMAGE_NO)
+                print("No web page connected")
+            shown = now
+        time.sleep_ms(20)
+finally:
+    # Ctrl-C (or an error) ends the loop, but Bluetooth would keep going:
+    # stop the car, then stop advertising before disconnecting the page,
+    # or the hub starts advertising again as soon as the page is gone.
+    drive("stop", 0)
+    p.stop_advertising()
+    p.disconnect()
+    light_matrix.clear()
+    print("Stopped")

@@ -902,7 +902,7 @@ The `examples/web_drive/` folder has two hub + page pairs, tested on a real hub 
 | Files | What it does |
 |---|---|
 | `simple.py` + `simple.html` | The smallest example. Type a message in the page; the hub prints it, replies, and smiles when the message is `smile`. Press the hub's left button and the page shows it. |
-| `main.py` + `index.html` | Drive a car (motors on ports A and B) with W A S D or the arrow keys and Space to stop, with a speed slider, an option to stop when you let go of the key, and a message log. The hub stops the motors if the page disconnects. |
+| `main.py` + `index.html` | Drive a car (motors on ports A and B) with W A S D or the arrow keys and Space to stop, with a speed slider (200 °/s to start), stopping when you let go of the key (can be turned off), and a message log. The hub stops the motors if the page disconnects. |
 
 1. Start the hub program from the REPL, e.g. `mpremote run simple.py`. You can then unplug the USB cable.
 2. Open `simple.html` in Chrome or Edge and click **Connect**. Pick your hub in the list.
@@ -982,7 +982,7 @@ function send(text) {
 }
 ```
 
-`requestDevice()` opens the browser's list of hubs, so call it from a button click (`connect` above is wired to the Connect button), not when the page loads. Filtering by `services` lists every hub running a spikecomm `Peripheral`. To filter by name instead, use `{ filters: [{ namePrefix: "Car" }], optionalServices: [SERVICE] }`; without `optionalServices` Chrome refuses with `Origin is not allowed to access any service`.
+`requestDevice()` opens the browser's list of hubs, so call it from a button click (`connect` above is wired to the Connect button), not when the page loads. Filtering by `services` lists every hub running a spikecomm `Peripheral`. The list shows each hub by the name its `Peripheral` advertises, or, once the computer has connected to that hub before, possibly by the hub's own name (the one it has in the SPIKE App). So don't depend on the `Peripheral` name to find a hub. To narrow the list by name anyway, add it to the same filter: `{ filters: [{ services: [SERVICE], namePrefix: "Car" }] }`.
 
 To send several values, use the same `"forward;500"` style as `encode()` and split it on the hub with `decode(msg)`.
 

@@ -304,7 +304,7 @@ Rules for the page:
 3. **At most 20 bytes per write.** Encode `text + "\n"` and write it in 20-byte slices; the hub joins them up to the `"\n"`.
 4. **One write at a time.** Starting a write before the previous one finished fails with `NetworkError: GATT operation already in progress`. Chain sends on a promise queue as in Template 7. When keys drive the hub, send only when the command changes (skip `keydown` events with `event.repeat`).
 5. **Collect notifications until a `"\n"`:** decode with one `TextDecoder` using `{ stream: true }`, split on `"\n"`, and keep the last, unfinished piece for next time.
-6. **Call `navigator.bluetooth.requestDevice()` from a click handler**, never when the page loads. Filter with `{ services: [SERVICE] }` (lists every spikecomm `Peripheral` nearby), or with `{ namePrefix: "Car" }` **plus** `optionalServices: [SERVICE]`.
+6. **Call `navigator.bluetooth.requestDevice()` from a click handler**, never when the page loads. Filter with `{ services: [SERVICE] }` (lists every spikecomm `Peripheral` nearby). Don't rely on the `Peripheral` name: once a computer has connected to a hub, the browser may list (and filter) it by the hub's own name, the one it has in the SPIKE App. A name filter, if wanted, goes in the same filter object as the service: `{ services: [SERVICE], namePrefix: "Car" }`.
 7. **Opening the file directly works** (double-click; Chrome allows Bluetooth for `file://` pages). On a website the page must be `https://` (or `http://localhost`).
 8. **Make the hub safe when the page goes away** (tab closed, out of range): stop motors when `p.is_connected` is `False` in the main loop, or in `on_disconnect`. If holding a key drives the robot, also send a stop on `keyup` and on the window's `blur`.
 
@@ -318,7 +318,7 @@ from spikecomm import Peripheral
 from hub import button, light_matrix
 import time
 
-p = Peripheral("Hub1")      # the name the browser shows: give every hub its own
+p = Peripheral("Hub1")      # the browser lists it as Hub1 or by the hub's own name
 p.advertise()
 
 
@@ -447,10 +447,10 @@ To control the hub, call `send(...)` from buttons or keys, e.g. `send("forward;5
 | One message arrives as two | It contained `"\n"`. Remove newlines; use `encode(...)` for several values. |
 | `wait_for` hangs | Called inside a callback, or no timeout and the message came before the call. |
 | Robot keeps driving after the controller stops | Add `on_disconnect` on the Peripheral that stops the motors. |
-| Hub isn't in the browser's device list | Hub program not running, or started with the Run button; another page or hub is already connected to it (one Central at a time); the page's name filter doesn't match. |
+| Hub isn't in the browser's device list | Hub program not running, or started with the Run button; another page or hub is already connected to it (one Central at a time); the page filters by a name the browser doesn't know the hub by (it may use the hub's own name from the SPIKE App): filter by service only. |
 | `navigator.bluetooth` is `undefined` | Safari, Firefox, or a browser on iPhone/iPad: use Chrome or Edge. On a website the page must be `https://`. |
 | `SecurityError: Failed to execute 'requestDevice' on 'Bluetooth': Must be handling a user gesture to show a permission request.` | `requestDevice()` ran when the page loaded; call it from a button's click handler. |
-| `SecurityError: Origin is not allowed to access any service.` | The page filters by name: add `optionalServices: [SERVICE]` to `requestDevice()`. |
+| `SecurityError: Origin is not allowed to access any service.` | The page filters by name only: put `services: [SERVICE]` in the same filter object (or add `optionalServices: [SERVICE]` to `requestDevice()`). |
 | `NetworkError: GATT operation already in progress.` | Two writes at once: queue them (Template 7's `send`). |
 | `NotFoundError: User cancelled the requestDevice() chooser.` | The device list was closed without picking a hub. |
 

@@ -230,12 +230,12 @@
   </header>
 
   <section class="panel">
-    <label for="name">Hub name starts with</label>
+    <label for="name">Only list hubs whose name starts with (optional)</label>
     <div class="row">
-      <input id="name" value="Car" spellcheck="false" autocomplete="off">
+      <input id="name" value="" placeholder="Blank: every hub" spellcheck="false" autocomplete="off">
       <button id="connect" type="button">Connect</button>
     </div>
-    <p class="hint">Use the <code>NAME</code> from <code>main.py</code>. Hub not in the list? Clear the box to list every spikecomm hub nearby.</p>
+    <p class="hint">With the box blank, the list shows every hub running a spikecomm <code>Peripheral</code>. A hub may appear as <code>SPIKE</code> or by its own name (the one it has in the SPIKE App).</p>
     <p id="status" class="status" role="status">Not connected</p>
   </section>
 
@@ -250,10 +250,10 @@
     <div class="controls">
       <div class="speed">
         <label for="speed">Speed</label>
-        <input id="speed" type="range" min="100" max="1000" step="50" value="500">
-        <output id="speed-out" for="speed">500 °/s</output>
+        <input id="speed" type="range" min="100" max="1000" step="50" value="200">
+        <output id="speed-out" for="speed">200 °/s</output>
       </div>
-      <label class="check"><input id="hold" type="checkbox"> Stop when I let go of the key</label>
+      <label class="check"><input id="hold" type="checkbox" checked> Stop when I let go of the key</label>
       <p class="doing">Hub is doing: <strong id="doing">—</strong></p>
     </div>
     <p class="hint">Arrow keys work too. A key turns solid once the hub confirms the command.</p>
@@ -308,12 +308,13 @@ async function connect() {
     setStatus("Bluetooth is off, or this browser isn't allowed to use it.", "error");
     return;
   }
+  // Only hubs running a spikecomm Peripheral; the name the browser matches
+  // may be the hub's own name rather than the one in main.py
+  const filter = { services: [UART_SERVICE] };
   const prefix = nameInput.value.trim();
+  if (prefix) filter.namePrefix = prefix;
   try {
-    device = await navigator.bluetooth.requestDevice({
-      filters: prefix ? [{ namePrefix: prefix }] : [{ services: [UART_SERVICE] }],
-      optionalServices: [UART_SERVICE],
-    });
+    device = await navigator.bluetooth.requestDevice({ filters: [filter] });
   } catch (e) {
     setStatus(e.name === "NotFoundError" ? "No hub chosen." : e.message, "error");
     return;

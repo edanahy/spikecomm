@@ -6,7 +6,7 @@ from spikecomm import Peripheral
 from hub import button, light_matrix
 import time
 
-p = Peripheral("Hub1")      # the name the browser shows: give every hub its own
+p = Peripheral("Hub1")      # the browser lists it as Hub1 or by the hub's own name
 p.advertise()
 
 
