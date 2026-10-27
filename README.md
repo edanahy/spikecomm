@@ -883,6 +883,7 @@ The `examples/` folder has complete Hub A / Hub B program pairs, tested on real 
 | `tilt_arrow_hubA.py`, `tilt_arrow_hubB.py` | Tilt Hub A; Hub B's screen shows an arrow pointing the way Hub A leans. No sensors or motors needed. |
 | `distance_spin_hubA.py`, `distance_spin_hubB.py` | Hub A broadcasts its distance-sensor reading (sensor on port A). When something comes closer than 50 cm, Hub B spins its motor (port A) 3 times, then waits for the object to move away before it can go again. Both screens show the distance as a bar; Hub B shows a turning arrow while it spins, a check mark when done, and an X if it loses Hub A. |
 | `web_drive/simple.py` + `simple.html`, `web_drive/main.py` + `index.html` | A hub and a web page talking to each other; see [Talking to a Web Page](#talking-to-a-web-page). |
+| `motormove_sound_hub.py` + `motormove_sound_computer.py` (+ `sound.mp3`) | A hub and a computer. The hub broadcasts its motor's position (motor on port A) and shows an arrow that turns with the motor. `motormove_sound_computer.py` runs on a computer with ordinary Python (`pip install bleak`) and plays the sound file each time the motor has turned 20° or more. It plays sounds the macOS way, and a note in `play_sound()` says what to change for Windows. A Mac hears the broadcast only about twice a second, so the sound can come a second or so after the motor turns. |
 
 ---
 

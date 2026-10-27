@@ -17,6 +17,7 @@ You are helping a student write MicroPython programs for **LEGO SPIKE Prime hubs
 | Share sensor values / status; 3 or more hubs; each hub both sends and receives | **Beacon + Scanner** (broadcast, no connection) |
 | Exactly two hubs; every message must arrive (commands, text, handshakes) | **Peripheral + Central** (connection) |
 | A web page (Chrome or Edge) talks to a hub | **Peripheral** on the hub; the page connects with Web Bluetooth (see "Web pages"). A page can't use Beacon + Scanner. |
+| A computer program (ordinary Python) reacts to a hub, e.g. plays a sound | **Beacon** on the hub; the computer scans with the `bleak` library (`pip install bleak`) and reads `advertisement_data.local_name`. Adapt `examples/motormove_sound_computer.py`. A Mac hears a Beacon only about twice a second (sometimes a 1–2 s gap). |
 
 If unsure between hubs, prefer Beacon + Scanner: it has fewer ways to fail.
 
@@ -92,7 +93,7 @@ decode("42;3.14;ok")        # -> [42, 3.14, "ok"]
 
 ## Templates
 
-Adapt these; keep their structure. Fuller pairs, tested on real hubs, are in the `examples/` folder if the student has it: `tilt_arrow_hubA.py` / `tilt_arrow_hubB.py` (Hub B's screen shows an arrow for the way Hub A is tilted) and `distance_spin_hubA.py` / `distance_spin_hubB.py` (Template 6 with light-matrix status indicators and signal-loss handling). Hub + web page pairs are in `examples/web_drive/` (see "Web pages").
+Adapt these; keep their structure. Fuller pairs, tested on real hubs, are in the `examples/` folder if the student has it: `tilt_arrow_hubA.py` / `tilt_arrow_hubB.py` (Hub B's screen shows an arrow for the way Hub A is tilted) and `distance_spin_hubA.py` / `distance_spin_hubB.py` (Template 6 with light-matrix status indicators and signal-loss handling). Hub + web page pairs are in `examples/web_drive/` (see "Web pages"). A hub + computer pair is `motormove_sound_hub.py` / `motormove_sound_computer.py` (the hub broadcasts its motor position; a Python program on a Mac plays a sound file each time the motor turns 20° or more).
 
 ### 1. Share a sensor value (Beacon → Scanner)
 
